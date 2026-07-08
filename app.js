@@ -158,8 +158,8 @@ async function searchAllDurations() {
   try {
     const { RouteMatrix } = await google.maps.importLibrary("routes");
     const response = await RouteMatrix.computeRouteMatrix({
-      origins: [{ waypoint: origin }],
-      destinations: PREFECTURE_POLICE_HQ.map((entry) => ({ waypoint: toSearchQuery(entry) })),
+      origins: [origin],
+      destinations: PREFECTURE_POLICE_HQ.map((entry) => toSearchQuery(entry)),
       travelMode: "TRANSIT",
       departureTime: departureDate,
       fields: ["distanceMeters", "durationMillis", "condition"],
