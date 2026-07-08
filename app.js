@@ -93,7 +93,7 @@ async function activateWithApiKey(apiKey) {
 
 function setupPlaceAutocomplete() {
   placeAutocompleteEl = new google.maps.places.PlaceAutocompleteElement({
-    locationBias: { radius: 500000, center: { lat: 36.2048, lng: 138.2529 } }, // 日本全体をおおまかにバイアス
+    includedRegionCodes: ["jp"], // 候補を日本国内に限定する
   });
   originContainer.innerHTML = "";
   originContainer.appendChild(placeAutocompleteEl);
