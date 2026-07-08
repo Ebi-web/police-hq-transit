@@ -1,18 +1,19 @@
 // 都道府県警察本部 所要時間一覧アプリ
-// Google Maps JavaScript API (Places + Distance Matrix) を使用する。
+// Google Maps JavaScript API の Places (New) / Routes ライブラリを使用する。
+// レガシー版の Places API / Distance Matrix API は 2025-03-01 以降の
+// 新規 Google Cloud プロジェクトでは利用できないため、新 API のみを使う。
 // API キーはユーザーがブラウザ上で入力し、localStorage にのみ保存する。
 
 const STORAGE_KEY = "police-hq-transit.google-maps-api-key";
-const DESTINATION_CHUNK_SIZE = 24; // Distance Matrix の destinations 上限(25)未満に収める
+const MAX_ROUTE_MATRIX_ITEMS = 100; // Routes API computeRouteMatrix の TRANSIT 要素数上限
 
-const apiKeyPanel = document.getElementById("api-key-panel");
 const apiKeyInput = document.getElementById("api-key-input");
 const apiKeyStatus = document.getElementById("api-key-status");
 const saveApiKeyButton = document.getElementById("save-api-key");
 const clearApiKeyButton = document.getElementById("clear-api-key");
 
 const searchPanel = document.getElementById("search-panel");
-const originInput = document.getElementById("origin-input");
+const originContainer = document.getElementById("origin-container");
 const departureInput = document.getElementById("departure-input");
 const searchButton = document.getElementById("search-button");
 const searchStatus = document.getElementById("search-status");
@@ -21,8 +22,8 @@ const resultPanel = document.getElementById("result-panel");
 const resultBody = document.getElementById("result-body");
 const resultTable = document.getElementById("result-table");
 
-let autocomplete = null;
-let selectedPlace = null;
+let placeAutocompleteEl = null;
+let selectedPlace = null; // { location, formattedAddress }
 let latestRows = [];
 let sortState = { key: "durationValue", asc: true };
 
@@ -32,20 +33,44 @@ function initDefaultDepartureTime() {
   departureInput.value = now.toISOString().slice(0, 16);
 }
 
+// 47件は destinations の要素数上限(100)以内に収まるため1リクエストで送る。
+// (レガシー Distance Matrix API では destinations 上限25件だったため分割が必要だったが
+//  Routes API の computeRouteMatrix では不要)
+function formatDuration(durationMillis) {
+  const totalMinutes = Math.round(durationMillis / 60000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  if (hours === 0) return `${minutes}分`;
+  return `${hours}時間${minutes}分`;
+}
+
 function loadGoogleMapsScript(apiKey) {
   return new Promise((resolve, reject) => {
-    if (window.google && window.google.maps) {
+    if (window.google && window.google.maps && window.google.maps.importLibrary) {
       resolve();
       return;
     }
+    window.gm_authFailure = () => {
+      reject(
+        new Error(
+          "Google Maps の認証に失敗しました。API キーが無効、課金が未設定、" +
+            "リファラ制限、または必要な API（Maps JavaScript API / Places API (New) / Routes API）が" +
+            "未有効化の可能性があります。ブラウザのコンソールに詳細なエラーが出ています。"
+        )
+      );
+    };
     window.__onGoogleMapsLoaded = () => resolve();
     const script = document.createElement("script");
-    script.src =
-      "https://maps.googleapis.com/maps/api/js?key=" +
-      encodeURIComponent(apiKey) +
-      "&libraries=places&callback=__onGoogleMapsLoaded";
+    const params = new URLSearchParams({
+      key: apiKey,
+      v: "weekly",
+      loading: "async",
+      callback: "__onGoogleMapsLoaded",
+    });
+    script.src = `https://maps.googleapis.com/maps/api/js?${params.toString()}`;
     script.async = true;
-    script.onerror = () => reject(new Error("Google Maps API の読み込みに失敗しました。キーを確認してください。"));
+    script.onerror = () =>
+      reject(new Error("Google Maps API の読み込みに失敗しました。ネットワークまたはキーを確認してください。"));
     document.head.appendChild(script);
   });
 }
@@ -54,25 +79,32 @@ async function activateWithApiKey(apiKey) {
   apiKeyStatus.textContent = "Google Maps API を読み込んでいます...";
   try {
     await loadGoogleMapsScript(apiKey);
+    await google.maps.importLibrary("places");
+    await google.maps.importLibrary("routes");
   } catch (err) {
     apiKeyStatus.textContent = err.message;
     return;
   }
   apiKeyStatus.textContent = "読み込み完了。";
   searchPanel.hidden = false;
-  setupAutocomplete();
+  setupPlaceAutocomplete();
   initDefaultDepartureTime();
 }
 
-function setupAutocomplete() {
-  autocomplete = new google.maps.places.Autocomplete(originInput, {
-    fields: ["formatted_address", "geometry", "name"],
+function setupPlaceAutocomplete() {
+  placeAutocompleteEl = new google.maps.places.PlaceAutocompleteElement({
+    locationBias: { radius: 500000, center: { lat: 36.2048, lng: 138.2529 } }, // 日本全体をおおまかにバイアス
   });
-  autocomplete.addListener("place_changed", () => {
-    selectedPlace = autocomplete.getPlace();
-  });
-  originInput.addEventListener("input", () => {
-    selectedPlace = null;
+  originContainer.innerHTML = "";
+  originContainer.appendChild(placeAutocompleteEl);
+
+  placeAutocompleteEl.addEventListener("gmp-select", async ({ placePrediction }) => {
+    const place = placePrediction.toPlace();
+    await place.fetchFields({ fields: ["location", "formattedAddress"] });
+    selectedPlace = {
+      location: place.location,
+      formattedAddress: place.formattedAddress,
+    };
   });
 }
 
@@ -93,54 +125,28 @@ clearApiKeyButton.addEventListener("click", () => {
   setTimeout(() => location.reload(), 500);
 });
 
-function chunkArray(array, size) {
-  const chunks = [];
-  for (let i = 0; i < array.length; i += size) {
-    chunks.push(array.slice(i, i + size));
-  }
-  return chunks;
-}
-
 function getOriginForRequest() {
-  if (selectedPlace && selectedPlace.geometry) {
-    return selectedPlace.geometry.location;
+  if (selectedPlace && selectedPlace.location) {
+    return selectedPlace.location;
   }
-  const text = originInput.value.trim();
-  return text || null;
+  return null;
 }
 
 function getOriginQueryForLink() {
-  if (selectedPlace && selectedPlace.geometry) {
-    const loc = selectedPlace.geometry.location;
-    return `${loc.lat()},${loc.lng()}`;
+  if (selectedPlace && selectedPlace.location) {
+    return `${selectedPlace.location.lat()},${selectedPlace.location.lng()}`;
   }
-  return originInput.value.trim();
-}
-
-function runDistanceMatrixBatch(service, origin, destinations, departureTime) {
-  return new Promise((resolve, reject) => {
-    service.getDistanceMatrix(
-      {
-        origins: [origin],
-        destinations: destinations,
-        travelMode: google.maps.TravelMode.TRANSIT,
-        transitOptions: { departureTime: departureTime },
-      },
-      (response, status) => {
-        if (status !== "OK") {
-          reject(new Error(`Distance Matrix リクエストに失敗しました (status: ${status})`));
-          return;
-        }
-        resolve(response.rows[0].elements);
-      }
-    );
-  });
+  return selectedPlace && selectedPlace.formattedAddress ? selectedPlace.formattedAddress : "";
 }
 
 async function searchAllDurations() {
   const origin = getOriginForRequest();
   if (!origin) {
-    searchStatus.textContent = "出発地点を入力してください。";
+    searchStatus.textContent = "出発地点の候補一覧から地点を選択してください。";
+    return;
+  }
+  if (PREFECTURE_POLICE_HQ.length > MAX_ROUTE_MATRIX_ITEMS) {
+    searchStatus.textContent = "警察本部の件数が上限を超えています。実装を見直してください。";
     return;
   }
   const departureDate = departureInput.value ? new Date(departureInput.value) : new Date();
@@ -149,37 +155,42 @@ async function searchAllDurations() {
   searchStatus.textContent = `${PREFECTURE_POLICE_HQ.length}件の警察本部への経路を検索中...`;
   resultPanel.hidden = true;
 
-  const chunks = chunkArray(PREFECTURE_POLICE_HQ, DESTINATION_CHUNK_SIZE);
-  const service = new google.maps.DistanceMatrixService();
-  const rows = [];
-
   try {
-    for (const chunk of chunks) {
-      const destinations = chunk.map(toSearchQuery);
-      const elements = await runDistanceMatrixBatch(service, origin, destinations, departureDate);
-      chunk.forEach((entry, i) => {
-        const el = elements[i];
-        const ok = el.status === "OK";
-        rows.push({
-          prefecture: entry.prefecture,
-          name: entry.name,
-          status: el.status,
-          durationText: ok ? el.duration.text : "経路なし",
-          durationValue: ok ? el.duration.value : Number.POSITIVE_INFINITY,
-          distanceText: ok ? el.distance.text : "-",
-          distanceValue: ok ? el.distance.value : Number.POSITIVE_INFINITY,
-          destinationQuery: toSearchQuery(entry),
-        });
-      });
-    }
+    const { RouteMatrix } = await google.maps.importLibrary("routes");
+    const response = await RouteMatrix.computeRouteMatrix({
+      origins: [{ waypoint: origin }],
+      destinations: PREFECTURE_POLICE_HQ.map((entry) => ({ waypoint: toSearchQuery(entry) })),
+      travelMode: "TRANSIT",
+      departureTime: departureDate,
+      fields: ["distanceMeters", "durationMillis", "condition"],
+    });
+
+    const matrix = response.matrix || response;
+    const row = matrix.rows[0];
+    const items = row.items || row.elements;
+
+    latestRows = PREFECTURE_POLICE_HQ.map((entry, i) => {
+      const item = items[i];
+      const ok = item && item.condition === "ROUTE_EXISTS";
+      return {
+        prefecture: entry.prefecture,
+        name: entry.name,
+        status: ok ? "OK" : "NOT_FOUND",
+        durationText: ok ? formatDuration(item.durationMillis) : "経路なし",
+        durationValue: ok ? item.durationMillis : Number.POSITIVE_INFINITY,
+        distanceText: ok ? `${(item.distanceMeters / 1000).toFixed(1)} km` : "-",
+        distanceValue: ok ? item.distanceMeters : Number.POSITIVE_INFINITY,
+        destinationQuery: toSearchQuery(entry),
+      };
+    });
   } catch (err) {
-    searchStatus.textContent = err.message;
+    console.error(err);
+    searchStatus.textContent = `検索に失敗しました: ${err.message || err}`;
     searchButton.disabled = false;
     return;
   }
 
-  latestRows = rows;
-  searchStatus.textContent = `検索完了（${rows.filter((r) => r.status === "OK").length}/${rows.length}件で経路が見つかりました）`;
+  searchStatus.textContent = `検索完了（${latestRows.filter((r) => r.status === "OK").length}/${latestRows.length}件で経路が見つかりました）`;
   searchButton.disabled = false;
   renderTable();
 }

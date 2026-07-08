@@ -18,8 +18,8 @@ API キーはブラウザの `localStorage` にのみ保存され、外部サー
 1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作成し、課金を有効化する
 2. 以下の API を有効化する
    - Maps JavaScript API
-   - Places API
-   - Distance Matrix API（Maps JavaScript API 経由で利用）
+   - Places API (New)
+   - Routes API
 3. 「認証情報」から API キーを新規作成する
 4. キーに以下の制限をかける（推奨）
    - アプリケーションの制限: **ウェブサイト**、リファラに `https://ebi-web.github.io/*` （ローカル確認時は `http://localhost:*/*` も追加）
@@ -27,12 +27,14 @@ API キーはブラウザの `localStorage` にのみ保存され、外部サー
 
 個人利用の呼び出し回数であれば、Google Maps Platform の無料枠内に収まる見込みだが、念のため [Google Cloud Console の予算アラート](https://cloud.google.com/billing/docs/how-to/budgets) を設定することを推奨する。
 
+> **注意**: 2025年3月1日以降に作成した Google Cloud プロジェクトでは、レガシー版の Places API（`google.maps.places.Autocomplete`）や Distance Matrix API は利用できない。本アプリは新しい `PlaceAutocompleteElement`（Places API (New)）と `RouteMatrix`（Routes API）を使用している。
+
 ## 技術仕様
 
-- Distance Matrix API の `travelMode: TRANSIT` で所要時間を取得する
-- destinations の上限（25件）を超えるため、47件を24件ずつ2回に分けてリクエストする
-- 出発地点は Places Autocomplete で選択、または住所・地名をテキスト入力する
-- 各都道府県警察本部は正式名称のみを Google のジオコーディングに渡す（住所は保持していない）
+- Routes API の `computeRouteMatrix`（`travelMode: TRANSIT`）で所要時間を取得する
+- destinations は47件（上限100件）のため1リクエストで送信する
+- 出発地点は `PlaceAutocompleteElement` の候補一覧から選択する（テキスト入力のみでは検索できない）
+- 各都道府県警察本部は正式名称のみを Google 側の解決に渡す（住所は保持していない）
 
 ## ローカルでの動作確認
 

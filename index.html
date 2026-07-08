@@ -15,7 +15,7 @@
 <section id="api-key-panel" class="panel">
   <h2>Google Maps API キー</h2>
   <p>
-    このアプリは Google Maps Platform の API（Maps JavaScript API / Places API / Distance Matrix API）を使用します。
+    このアプリは Google Maps Platform の API（Maps JavaScript API / Places API (New) / Routes API）を使用します。
     キーはブラウザの localStorage にのみ保存され、サーバーには送信されません。
     発行・制限方法は <a href="https://github.com/Ebi-web/police-hq-transit#readme">README</a> を参照してください。
   </p>
@@ -30,8 +30,8 @@
 <section id="search-panel" class="panel" hidden>
   <h2>検索条件</h2>
   <div class="row">
-    <label for="origin-input">出発地点</label>
-    <input type="text" id="origin-input" placeholder="例: 東京駅">
+    <label>出発地点</label>
+    <div id="origin-container" class="autocomplete-container"></div>
   </div>
   <div class="row">
     <label for="departure-input">出発日時</label>

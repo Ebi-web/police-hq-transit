@@ -75,6 +75,15 @@ input[type="datetime-local"] {
   font-size: 0.95rem;
 }
 
+.autocomplete-container {
+  flex: 1;
+  min-width: 220px;
+}
+
+.autocomplete-container gmp-place-autocomplete {
+  width: 100%;
+}
+
 button {
   padding: 0.5rem 1.1rem;
   border: none;
