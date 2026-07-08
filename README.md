@@ -8,8 +8,10 @@
 
 1. [GitHub Pages の公開URL](https://ebi-web.github.io/police-hq-transit/) にアクセスする
 2. Google Maps API キーを入力して保存する（下記「API キーの発行」を参照）
-3. 出発地点と出発日時を入力し、「所要時間を検索」を押す
-4. 47都道府県の警察本部への所要時間・距離が一覧表示される。列見出しをクリックすると並び替えできる
+3. 出発地点・出発日時・検索対象の都道府県（チェックボックス、デフォルトは全選択）を指定し、「所要時間を検索」を押す
+4. 選択した都道府県の警察本部への所要時間・距離が一覧表示される。列見出しをクリックすると並び替えできる
+
+都道府県の選択状態は `localStorage` に保存され、次回訪問時も復元される。
 
 API キーはブラウザの `localStorage` にのみ保存され、外部サーバーには送信されない。
 
@@ -32,9 +34,9 @@ API キーはブラウザの `localStorage` にのみ保存され、外部サー
 ## 技術仕様
 
 - Routes API の `computeRouteMatrix`（`travelMode: TRANSIT`）で所要時間を取得する
-- destinations は47件（上限100件）のため1リクエストで送信する
+- 検索対象は最大47件（Routes API の TRANSIT 要素数上限100件以内）を1リクエストで送信する
 - 出発地点は `PlaceAutocompleteElement` の候補一覧から選択する（テキスト入力のみでは検索できない）
-- 各都道府県警察本部は正式名称のみを Google 側の解決に渡す（住所は保持していない）
+- 各都道府県警察本部の座標は OpenStreetMap Nominatim のジオコーディング結果を基にしている（`data/prefectures.js` 参照）。destinations には座標を渡し、Google Maps への経路リンクの destination には都道府県名+正式名称の文字列を渡す
 
 ## ローカルでの動作確認
 

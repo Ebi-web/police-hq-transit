@@ -5,6 +5,7 @@
 // API キーはユーザーがブラウザ上で入力し、localStorage にのみ保存する。
 
 const STORAGE_KEY = "police-hq-transit.google-maps-api-key";
+const PREFECTURE_SELECTION_STORAGE_KEY = "police-hq-transit.selected-prefectures";
 const MAX_ROUTE_MATRIX_ITEMS = 100; // Routes API computeRouteMatrix の TRANSIT 要素数上限
 
 const apiKeyInput = document.getElementById("api-key-input");
@@ -15,6 +16,9 @@ const clearApiKeyButton = document.getElementById("clear-api-key");
 const searchPanel = document.getElementById("search-panel");
 const originContainer = document.getElementById("origin-container");
 const departureInput = document.getElementById("departure-input");
+const prefectureChecklist = document.getElementById("prefecture-checklist");
+const selectAllButton = document.getElementById("select-all-prefectures");
+const selectNoneButton = document.getElementById("select-none-prefectures");
 const searchButton = document.getElementById("search-button");
 const searchStatus = document.getElementById("search-status");
 
@@ -27,15 +31,67 @@ let selectedPlace = null; // { location, formattedAddress }
 let latestRows = [];
 let sortState = { key: "durationValue", asc: true };
 
+function loadSelectedPrefectures() {
+  const saved = localStorage.getItem(PREFECTURE_SELECTION_STORAGE_KEY);
+  if (!saved) return new Set(PREFECTURE_POLICE_HQ.map((e) => e.prefecture));
+  try {
+    return new Set(JSON.parse(saved));
+  } catch {
+    return new Set(PREFECTURE_POLICE_HQ.map((e) => e.prefecture));
+  }
+}
+
+function saveSelectedPrefectures(selected) {
+  localStorage.setItem(PREFECTURE_SELECTION_STORAGE_KEY, JSON.stringify([...selected]));
+}
+
+function setupPrefectureChecklist() {
+  const selected = loadSelectedPrefectures();
+  prefectureChecklist.innerHTML = "";
+  PREFECTURE_POLICE_HQ.forEach((entry) => {
+    const label = document.createElement("label");
+    label.className = "prefecture-checkbox";
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = entry.prefecture;
+    checkbox.checked = selected.has(entry.prefecture);
+    checkbox.addEventListener("change", () => {
+      const current = loadSelectedPrefectures();
+      if (checkbox.checked) {
+        current.add(entry.prefecture);
+      } else {
+        current.delete(entry.prefecture);
+      }
+      saveSelectedPrefectures(current);
+    });
+    label.appendChild(checkbox);
+    label.appendChild(document.createTextNode(entry.prefecture));
+    prefectureChecklist.appendChild(label);
+  });
+}
+
+function setAllPrefectureCheckboxes(checked) {
+  const selected = checked ? new Set(PREFECTURE_POLICE_HQ.map((e) => e.prefecture)) : new Set();
+  saveSelectedPrefectures(selected);
+  prefectureChecklist.querySelectorAll("input[type='checkbox']").forEach((cb) => {
+    cb.checked = checked;
+  });
+}
+
+function getSelectedEntries() {
+  const selected = loadSelectedPrefectures();
+  return PREFECTURE_POLICE_HQ.filter((entry) => selected.has(entry.prefecture));
+}
+
+selectAllButton.addEventListener("click", () => setAllPrefectureCheckboxes(true));
+selectNoneButton.addEventListener("click", () => setAllPrefectureCheckboxes(false));
+
 function initDefaultDepartureTime() {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   departureInput.value = now.toISOString().slice(0, 16);
 }
 
-// 47件は destinations の要素数上限(100)以内に収まるため1リクエストで送る。
-// (レガシー Distance Matrix API では destinations 上限25件だったため分割が必要だったが
-//  Routes API の computeRouteMatrix では不要)
 function formatDuration(durationMillis) {
   const totalMinutes = Math.round(durationMillis / 60000);
   const hours = Math.floor(totalMinutes / 60);
@@ -88,6 +144,7 @@ async function activateWithApiKey(apiKey) {
   apiKeyStatus.textContent = "読み込み完了。";
   searchPanel.hidden = false;
   setupPlaceAutocomplete();
+  setupPrefectureChecklist();
   initDefaultDepartureTime();
 }
 
@@ -145,33 +202,42 @@ async function searchAllDurations() {
     searchStatus.textContent = "出発地点の候補一覧から地点を選択してください。";
     return;
   }
-  if (PREFECTURE_POLICE_HQ.length > MAX_ROUTE_MATRIX_ITEMS) {
-    searchStatus.textContent = "警察本部の件数が上限を超えています。実装を見直してください。";
+  const targets = getSelectedEntries();
+  if (targets.length === 0) {
+    searchStatus.textContent = "検索する都道府県を1つ以上選択してください。";
+    return;
+  }
+  if (targets.length > MAX_ROUTE_MATRIX_ITEMS) {
+    searchStatus.textContent = "選択件数が上限を超えています。実装を見直してください。";
     return;
   }
   const departureDate = departureInput.value ? new Date(departureInput.value) : new Date();
 
   searchButton.disabled = true;
-  searchStatus.textContent = `${PREFECTURE_POLICE_HQ.length}件の警察本部への経路を検索中...`;
+  searchStatus.textContent = `${targets.length}件の警察本部への経路を検索中...`;
   resultPanel.hidden = true;
 
   try {
     const { RouteMatrix } = await google.maps.importLibrary("routes");
     const response = await RouteMatrix.computeRouteMatrix({
       origins: [origin],
-      destinations: PREFECTURE_POLICE_HQ.map((entry) => toSearchQuery(entry)),
+      destinations: targets.map((entry) => ({ lat: entry.lat, lng: entry.lng })),
       travelMode: "TRANSIT",
       departureTime: departureDate,
       fields: ["distanceMeters", "durationMillis", "condition"],
     });
+    console.log("RouteMatrix response:", response);
 
     const matrix = response.matrix || response;
     const row = matrix.rows[0];
     const items = row.items || row.elements;
 
-    latestRows = PREFECTURE_POLICE_HQ.map((entry, i) => {
+    latestRows = targets.map((entry, i) => {
       const item = items[i];
-      const ok = item && item.condition === "ROUTE_EXISTS";
+      const ok = item && typeof item.durationMillis === "number" && item.durationMillis > 0;
+      if (!ok) {
+        console.warn(`経路が見つかりませんでした: ${entry.prefecture} ${entry.name}`, item);
+      }
       return {
         prefecture: entry.prefecture,
         name: entry.name,

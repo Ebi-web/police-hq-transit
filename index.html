@@ -37,6 +37,14 @@
     <label for="departure-input">出発日時</label>
     <input type="datetime-local" id="departure-input">
   </div>
+  <div class="row prefecture-row">
+    <label>対象都道府県</label>
+    <div class="prefecture-controls">
+      <button id="select-all-prefectures" type="button" class="secondary">全選択</button>
+      <button id="select-none-prefectures" type="button" class="secondary">全解除</button>
+    </div>
+  </div>
+  <div id="prefecture-checklist" class="prefecture-checklist"></div>
   <div class="row">
     <button id="search-button">所要時間を検索</button>
   </div>
